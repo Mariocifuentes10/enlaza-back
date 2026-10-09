@@ -26,6 +26,8 @@ export interface PerfilEmpresa {
   sello: SelloEmpresa | null;
 }
 
+export type ResumenPublicoEmpresa = Omit<PerfilEmpresa, 'correo' | 'id_usuario'>;
+
 const incluirPerfilEmpresa = {
   usuario: { select: { correo: true } },
   sello: true,
@@ -59,7 +61,7 @@ function verificarAcceso(idUsuario: number, solicitante: UsuarioSolicitante): vo
   }
 }
 
-export async function resumenPublico(id: number): Promise<PerfilEmpresa> {
+export async function resumenPublico(id: number): Promise<ResumenPublicoEmpresa> {
   const empresa = await prisma.empresa.findUnique({
     where: { id_empresa: id },
     include: incluirPerfilEmpresa,
