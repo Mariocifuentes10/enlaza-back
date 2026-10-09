@@ -1,0 +1,2959 @@
+openapi: 3.1.0
+info:
+  title: Enlaza API
+  description: >
+    API de Enlaza, plataforma web de empleo inclusivo para personas con
+    discapacidad. El frontend usa esta especificación como fuente única
+    de verdad para su cliente HTTP.
+  license:
+    name: Privado
+  version: 0.6.0
+servers:
+  - url: http://localhost:4000/api
+    description: Local
+security:
+  - {}
+tags:
+  - name: auth
+    description: Registro, acceso y sesión de usuarios
+  - name: archivos
+    description: Subida de archivos (CV y logos)
+  - name: candidatos
+    description: Perfiles de candidatos
+  - name: empresas
+    description: Perfiles de empresas
+  - name: vacantes
+    description: Ofertas de empleo y su catálogo de ajustes
+  - name: catalogos
+    description: Catálogos de habilidades y tipos de ajuste razonable
+  - name: postulaciones
+    description: Postulaciones de candidatos a vacantes y sus estados
+  - name: chatbot
+    description: Asistente conversacional con IA
+  - name: sello
+    description: Sello de inclusión y su flujo de verificación
+  - name: resenas
+    description: Reseñas de candidatos sobre empresas
+  - name: mentores
+    description: Perfiles de mentores disponibles
+  - name: mentorias
+    description: Agenda de sesiones de mentoría
+  - name: health
+    description: Estado del servicio
+paths:
+  /health:
+    get:
+      tags: [health]
+      operationId: getHealth
+      summary: Estado de la API
+      responses:
+        '200':
+          description: Servicio operativo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+        '500':
+          description: Error interno
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/registro:
+    post:
+      tags: [auth]
+      operationId: registrarUsuario
+      summary: Crear una cuenta y su perfil base
+      description: >
+        Crea un Usuario y el perfil correspondiente. Los roles
+        candidato y mentor crean un perfil de candidato (el mentor además
+        su registro de mentor); el rol empresa crea un perfil de empresa.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegistroRequest'
+      responses:
+        '201':
+          description: Cuenta creada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/UsuarioResponse'
+        '409':
+          description: El correo ya está registrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Datos de entrada inválidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/login:
+    post:
+      tags: [auth]
+      operationId: iniciarSesion
+      summary: Iniciar sesión
+      description: >
+        Valida credenciales y emite un access token (en el cuerpo) y un
+        refresh token (cookie HttpOnly).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Sesión iniciada
+          headers:
+            Set-Cookie:
+              description: Refresh token en cookie HttpOnly
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Credenciales inválidas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Datos de entrada inválidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      operationId: rotarSesion
+      summary: Rotar la sesión
+      description: >
+        Usa el refresh token (cookie) para generar un nuevo par de tokens
+        y revocar el anterior. Emite cookies nuevas.
+      responses:
+        '200':
+          description: Sesión renovada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Sesión inválida, expirada o revocada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      operationId: cerrarSesion
+      summary: Cerrar sesión
+      description: Revoca el refresh token de la cookie y limpia la cookie.
+      responses:
+        '204':
+          description: Sesión cerrada
+        '401':
+          description: Sin sesión activa (aun así se limpia la cookie)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/me:
+    get:
+      tags: [auth]
+      operationId: usuarioActual
+      summary: Usuario autenticado y su perfil
+      description: >
+        Devuelve el usuario de la sesión actual e ids de su perfil
+        (id_candidato o id_empresa, el que corresponda).
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Usuario actual
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    allOf:
+                      - $ref: '#/components/schemas/UsuarioResponse'
+                      - type: object
+                        properties:
+                          id_candidato:
+                            type: [integer, 'null']
+                            example: 1
+                          id_empresa:
+                            type: [integer, 'null']
+                            example: null
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /candidatos/{id}:
+    get:
+      tags: [candidatos]
+      operationId: obtenerCandidato
+      summary: Ver un perfil de candidato
+      description: >
+        Solo el propio candidato o un administrador pueden ver el perfil.
+        Los datos de tipo de discapacidad son privados.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RutaId'
+      responses:
+        '200':
+          description: Perfil de candidato
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/CandidatoPerfil'
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Sin permiso sobre este perfil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Perfil no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Id inválido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    put:
+      tags: [candidatos]
+      operationId: actualizarCandidato
+      summary: Editar un perfil de candidato
+      description: >
+        Actualiza los campos enviados del perfil. Solo el propio candidato
+        o un administrador pueden editarlo. Al menos un campo es obligatorio.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RutaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CandidatoActualizar'
+      responses:
+        '200':
+          description: Perfil actualizado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/CandidatoPerfil'
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Sin permiso sobre este perfil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Perfil no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Id o datos inválidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /candidatos/{id}/recomendaciones:
+    get:
+      tags: [candidatos]
+      operationId: candidatoRecomendaciones
+      summary: Vacantes recomendadas para un candidato
+      description: >
+        Vacantes activas ordenadas por compatibilidad, calculada con la
+        similitud coseno entre el embedding del perfil del candidato
+        (resumen y habilidades) y el de cada vacante (título y descripción).
+        Excluye las vacantes a las que el candidato ya se postuló.
+        Solo el propio candidato o un administrador.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RutaId'
+        - name: page
+          in: query
+          description: Número de página
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          description: Resultados por página (máximo 50)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+      responses:
+        '200':
+          description: Listado paginado de vacantes recomendadas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/ListadoRecomendaciones'
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Solo el propio candidato o un administrador
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Candidato no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Id o parámetros inválidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Generación de embeddings no disponible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /empresas/{id}:
+    get:
+      tags: [empresas]
+      operationId: obtenerEmpresa
+      summary: Ver un perfil de empresa
+      description: Solo la propia empresa o un administrador pueden verlo.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RutaId'
+      responses:
+        '200':
+          description: Perfil de empresa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/EmpresaPerfil'
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Sin permiso sobre este perfil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Perfil no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Id inválido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    put:
+      tags: [empresas]
+      operationId: actualizarEmpresa
+      summary: Editar un perfil de empresa
+      description: >
+        Actualiza los campos enviados del perfil. Solo la propia empresa
+        o un administrador pueden editarlo. Al menos un campo es obligatorio.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RutaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmpresaActualizar'
+      responses:
+        '200':
+          description: Perfil actualizado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/EmpresaPerfil'
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Sin permiso sobre este perfil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Perfil no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Id o datos inválidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /vacantes:
+    get:
+      tags: [vacantes]
+      operationId: listarVacantes
+      summary: Listar vacantes
+      description: >
+        Listado público de vacantes según su estado (activas por defecto),
+        con paginación y los ajustes ofrecidos por cada una.
+      parameters:
+        - name: estado
+          in: query
+          description: Estado de las vacantes a listar
+          schema:
+            type: string
+            enum: [activa, cerrada, en_revision]
+            default: activa
+        - name: page
+          in: query
+          description: Número de página
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          description: Resultados por página (máximo 50)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+      responses:
+        '200':
+          description: Listado paginado de vacantes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/ListadoVacantes'
+        '422':
+          description: Parámetros inválidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags: [vacantes]
+      operationId: crearVacante
+      summary: Crear una vacante
+      description: >
+        Publica una oferta de empleo y los ajustes razonables que ofrece.
+        Solo la cuenta de empresa dueña o un administrador pueden crearla.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VacanteInput'
+      responses:
+        '201':
+          description: Vacante creada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/VacanteResponse'
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Solo las cuentas de empresa pueden crear vacantes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Datos inválidos o ajustes inexistentes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /vacantes/buscar:
+    get:
+      tags: [vacantes]
+      operationId: buscarVacantes
+      summary: Buscar vacantes
+      description: >
+        Búsqueda pública por texto libre (usa el índice FULLTEXT sobre
+        título y descripción), ubicación y modalidad, con paginación.
+        El texto se ignora si es muy corto (menos de 3 caracteres).
+      parameters:
+        - name: texto
+          in: query
+          description: Texto libre sobre el título y la descripción
+          schema:
+            type: string
+            maxLength: 200
+        - name: ubicacion
+          in: query
+          description: Ubicación del puesto (coincidencia parcial)
+          schema:
+            type: string
+            maxLength: 150
+        - name: modalidad
+          in: query
+          description: Modalidad de trabajo
+          schema:
+            type: string
+            enum: [presencial, remoto, hibrido]
+        - name: page
+          in: query
+          description: Número de página
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          description: Resultados por página (máximo 50)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+      responses:
+        '200':
+          description: Resultados de la búsqueda (solo vacantes activas)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/ListadoVacantes'
+        '422':
+          description: Parámetros inválidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /vacantes/{id}:
+    get:
+      tags: [vacantes]
+      operationId: obtenerVacante
+      summary: Ver detalle de una vacante
+      description: Detalle público de una vacante con sus ajustes y la empresa publicante.
+      parameters:
+        - $ref: '#/components/parameters/RutaId'
+      responses:
+        '200':
+          description: Detalle de la vacante
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/VacanteResponse'
+        '404':
+          description: Vacante no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Id inválido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    put:
+      tags: [vacantes]
+      operationId: actualizarVacante
+      summary: Editar una vacante
+      description: >
+        Actualiza los campos enviados y, si se indican, reemplaza el set de
+        ajustes ofrecidos. Solo la empresa dueña o un administrador pueden editarla.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RutaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VacanteActualizar'
+      responses:
+        '200':
+          description: Vacante actualizada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/VacanteResponse'
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Solo la empresa dueña o un administrador pueden editarla
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Vacante no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Datos inválidos o ajustes inexistentes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      tags: [vacantes]
+      operationId: eliminarVacante
+      summary: Eliminar una vacante
+      description: >
+        Elimina una vacante y sus relaciones. Solo la empresa dueña
+        o un administrador pueden eliminarla.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RutaId'
+      responses:
+        '200':
+          description: Vacante eliminada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      id_vacante:
+                        type: integer
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Solo la empresa dueña o un administrador pueden eliminarla
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Vacante no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Id inválido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /vacantes/{id}/sugerir-ajustes:
+    post:
+      tags: [vacantes]
+      operationId: sugerirAjustesVacante
+      summary: Sugerir ajustes razonables para una vacante
+      description: >
+        Usa la API de Claude para recomendar ajustes razonables adecuados para
+        el tipo de puesto, basándose en la normativa general de accesibilidad
+        laboral. Solo se sugieren ajustes existentes en el catálogo de tipos de
+        ajuste. Solo la empresa dueña de la vacante o un administrador.
+        La clave de la API de IA nunca se expone al frontend.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RutaId'
+      responses:
+        '200':
+          description: Ajustes razonables recomendados
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AjusteSugerido'
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Solo la empresa dueña o un administrador
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Vacante no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Id inválido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: El asistente de IA falló
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /vacantes/{id}/alerta-lenguaje:
+    get:
+      tags: [vacantes]
+      operationId: obtenerAlertaLenguaje
+      summary: Consultar alerta de lenguaje excluyente de una vacante
+      description: >
+        Devuelve si la descripción de la vacante tiene lenguaje potencialmente
+        excluyente o capacitista detectado por el analizador de IA y, en ese caso,
+        una sugerencia de redacción alternativa inclusiva. Solo la empresa dueña
+        de la vacante o un administrador.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RutaId'
+      responses:
+        '200':
+          description: Detalle de la alerta de lenguaje
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/AlertaLenguaje'
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Solo la empresa dueña o un administrador
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Vacante no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Id inválido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /habilidades:
+    get:
+      tags: [catalogos]
+      operationId: listarHabilidades
+      summary: Listar catálogo de habilidades
+      description: Catálogo público de habilidades, opcionalmente filtrado por categoría.
+      parameters:
+        - name: categoria
+          in: query
+          description: Filtrar por categoría (coincidencia exacta)
+          schema:
+            type: string
+            maxLength: 50
+      responses:
+        '200':
+          description: Habilidades del catálogo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Habilidad'
+        '422':
+          description: Parámetros inválidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags: [catalogos]
+      operationId: crearHabilidad
+      summary: Agregar una habilidad al catálogo
+      description: Solo un administrador puede escribir en el catálogo.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HabilidadInput'
+      responses:
+        '201':
+          description: Habilidad creada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/Habilidad'
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Solo administradores
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: La habilidad ya existe
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Datos inválidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /habilidades/{id}:
+    delete:
+      tags: [catalogos]
+      operationId: eliminarHabilidad
+      summary: Eliminar una habilidad del catálogo
+      description: Solo un administrador puede escribir en el catálogo.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RutaId'
+      responses:
+        '200':
+          description: Habilidad eliminada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      id_habilidad:
+                        type: integer
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Solo administradores
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Habilidad no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Id inválido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /tipos-ajuste:
+    get:
+      tags: [catalogos]
+      operationId: listarTiposAjuste
+      summary: Listar catálogo de tipos de ajuste
+      description: Catálogo público de ajustes razonables para candidatos y vacantes.
+      responses:
+        '200':
+          description: Tipos de ajuste del catálogo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TipoAjuste'
+    post:
+      tags: [catalogos]
+      operationId: crearTipoAjuste
+      summary: Agregar un tipo de ajuste al catálogo
+      description: Solo un administrador puede escribir en el catálogo.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TipoAjusteInput'
+      responses:
+        '201':
+          description: Tipo de ajuste creado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/TipoAjuste'
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Solo administradores
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: El tipo de ajuste ya existe
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Datos inválidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /tipos-ajuste/{id}:
+    delete:
+      tags: [catalogos]
+      operationId: eliminarTipoAjuste
+      summary: Eliminar un tipo de ajuste del catálogo
+      description: Solo un administrador puede escribir en el catálogo.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RutaId'
+      responses:
+        '200':
+          description: Tipo de ajuste eliminado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      id_ajuste:
+                        type: integer
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Solo administradores
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Tipo de ajuste no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Id inválido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /postulaciones:
+      post:
+        tags: [postulaciones]
+        operationId: postularAVacante
+        summary: Postularse a una vacante
+        description: >
+          Un candidato postula a una vacante activa. No se permite postularse
+          dos veces a la misma vacante (restricción única candidato + vacante).
+        security:
+          - bearerAuth: []
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PostulacionInput'
+        responses:
+          '201':
+            description: Postulación creada
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    success:
+                      type: boolean
+                      example: true
+                    data:
+                      $ref: '#/components/schemas/PostulacionResponse'
+          '401':
+            description: Sin autenticación
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '403':
+            description: Solo los candidatos pueden postularse
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '404':
+            description: Vacante no encontrada
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '409':
+            description: Ya postulado, o la vacante no está activa
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '422':
+            description: Datos inválidos
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+
+  /postulaciones/{id}/estado:
+    patch:
+      tags: [postulaciones]
+      operationId: cambiarEstadoPostulacion
+      summary: Cambiar el estado de una postulación
+      description: >
+        Solo la empresa dueña de la vacante (o un administrador) puede avanzar
+        el estado. Desde cualquier estado no terminal se puede pasar a
+        en_revision, entrevista, contratada o rechazada; una vez
+        rechazada o contratada no admite cambios.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RutaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CambiarEstadoInput'
+      responses:
+        '200':
+          description: Estado actualizado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/PostulacionResponse'
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Solo la empresa dueña de la vacante puede cambiar el estado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Postulación no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Transición inválida o postulación cerrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Id o estado inválido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /candidatos/{id}/postulaciones:
+    get:
+      tags: [postulaciones]
+      operationId: postulacionesDeCandidato
+      summary: Postulaciones de un candidato
+      description: >
+        Dashboard del candidato con el estado de cada postulación y los datos
+        de la vacante y la empresa publicante. Solo el propio candidato
+        o un administrador.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RutaId'
+        - name: estado
+          in: query
+          description: Filtrar por estado
+          schema:
+            $ref: '#/components/schemas/EstadoPostulacion'
+        - name: page
+          in: query
+          description: Número de página
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          description: Resultados por página (máximo 50)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+      responses:
+        '200':
+          description: Listado paginado de postulaciones
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/ListadoPostulaciones'
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Solo el propio candidato o un administrador
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Candidato no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Id o parámetros inválidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /empresas/{id}/postulaciones-recibidas:
+    get:
+      tags: [postulaciones]
+      operationId: postulacionesRecibidas
+      summary: Postulaciones recibidas por una empresa
+      description: >
+        Dashboard de la empresa con las postulaciones a sus vacantes, el perfil
+        público de cada candidato y un resumen por estado. El tipo de
+        discapacidad solo se muestra si el candidato lo hace visible.
+        Solo la propia empresa o un administrador.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RutaId'
+        - name: estado
+          in: query
+          description: Filtrar por estado
+          schema:
+            $ref: '#/components/schemas/EstadoPostulacion'
+        - name: id_vacante
+          in: query
+          description: Filtrar por una vacante de la empresa
+          schema:
+            type: integer
+        - name: page
+          in: query
+          description: Número de página
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          description: Resultados por página (máximo 50)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+      responses:
+        '200':
+          description: Listado paginado de postulaciones recibidas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/ListadoPostulacionesRecibidas'
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Solo la propia empresa o un administrador
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Empresa no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Id o parámetros inválidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /chatbot/mensaje:
+    post:
+      tags: [chatbot]
+      operationId: enviarMensajeChatbot
+      summary: Enviar un mensaje al asistente de IA
+      description: >
+        Envía un mensaje al asistente de Enlaza junto con el historial reciente
+        de la conversación. La API de Claude genera la respuesta y tanto el
+        mensaje del usuario como la respuesta del asistente quedan guardados en
+        la tabla conversaciones_chatbot. Si el candidato indicó una discapacidad
+        cognitiva, el asistente adapta su tono a respuestas simples y
+        estructuradas. La clave de la API de IA nunca se expone al frontend.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MensajeChatbotInput'
+      responses:
+        '200':
+          description: Respuesta del asistente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/RespuestaChatbot'
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Datos inválidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: El asistente de IA falló
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: El asistente de IA no está configurado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /empresas/{id}/sello/solicitar:
+    post:
+      tags: [sello]
+      operationId: solicitarSelloInclusion
+      summary: Solicitar o re-solicitar el sello de inclusión
+      description: >
+        La empresa dueña (o un administrador) envía la evidencia para
+        obtener el sello. Si no hay solicitud previa se crea en estado
+        pendiente; si la anterior fue rechazada se reabre a pendiente
+        limpiando el motivo. Si hay una en revisión o ya aprobada se
+        responde 409.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RutaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SelloInput'
+      responses:
+        '201':
+          description: Solicitud creada o reabierta
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/SelloResponse'
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Solo la empresa dueña puede solicitar su sello
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Empresa no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Sello ya aprobado o solicitud en revisión
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Datos inválidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /admin/sello:
+    get:
+      tags: [sello]
+      operationId: listarSolicitudesSello
+      summary: Listar solicitudes del sello de inclusión
+      description: >
+        Solo el rol admin. Devuelve las solicitudes filtradas por estado
+        (por defecto pendiente) con los datos de la empresa.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: estado
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [pendiente, aprobado, rechazado]
+          description: Filtro por estado de la solicitud
+      responses:
+        '200':
+          description: Listado de solicitudes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/ListadoSolicitudesSello'
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Solo el rol admin
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /admin/sello/{id}:
+    patch:
+      tags: [sello]
+      operationId: revisarSelloInclusion
+      summary: Aprobar o rechazar una solicitud de sello
+      description: >
+        Solo el rol admin. Al aprobar se fija la fecha de verificación y el
+        administrador responsable. Al rechazar es obligatorio indicar
+        motivo_rechazo, que la empresa podrá ver en su perfil.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RutaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SelloDecisionInput'
+      responses:
+        '200':
+          description: Solicitud revisada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/SelloResponse'
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Solo el rol admin
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Solicitud no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: El sello ya fue aprobado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Datos inválidos (motivo obligatorio si se rechaza)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /empresas/{id}/resenas:
+    post:
+      tags: [resenas]
+      operationId: crearResenaEmpresa
+      summary: Publicar una reseña de la empresa
+      description: >
+        Solo el rol candidato. Para reseñar se requiere haber tenido una
+        postulación con estado entrevista o contratada en esa empresa. Es
+        una sola reseña por candidato y empresa (restricción única). El
+        campo moderada nace en false.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RutaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResenaInput'
+      responses:
+        '201':
+          description: Reseña publicada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/ResenaResponse'
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Solo candidatos, o sin entrevista/contrato con la empresa
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Empresa no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Ya existe una reseña de este candidato para la empresa
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Datos inválidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    get:
+      tags: [resenas]
+      operationId: listarResenasEmpresa
+      summary: Listar reseñas de una empresa
+      description: >
+        Cualquier usuario autenticado puede ver las reseñas publicadas de
+        la empresa junto con el promedio de calificación.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RutaId'
+      responses:
+        '200':
+          description: Listado de reseñas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/ListadoResenas'
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Empresa no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /mentores:
+    get:
+      tags: [mentores]
+      operationId: listarMentoresDisponibles
+      summary: Listar mentores disponibles
+      description: >
+        Cualquier usuario autenticado. Devuelve los perfiles de mentor con
+        disponible = true y su información pública de candidato.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Listado de mentores
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MentorResponse'
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags: [mentores]
+      operationId: activarMentor
+      summary: Activarse como mentor
+      description: >
+        Solo el rol candidato. Crea el perfil de mentor del candidato
+        (disponible = true). Si ya es mentor responde 409.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MentorInput'
+      responses:
+        '201':
+          description: Perfil de mentor creado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/MentorResponse'
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Solo el rol candidato
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Perfil de candidato no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Ya eres mentor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Datos inválidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /mentorias:
+    post:
+      tags: [mentorias]
+      operationId: agendarMentoria
+      summary: Agendar una sesión de mentoría
+      description: >
+        Roles candidato y mentor. Agenda una sesión con un mentor cuya
+        fecha (fecha_sesion) es opcional. No se admite agendar con uno
+        mismo.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MentoriaInput'
+      responses:
+        '201':
+          description: Mentoría agendada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/MentoriaResponse'
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Solo candidatos y mentores
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Mentor o perfil de candidato no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Datos inválidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /archivos/{tipo}:
+    post:
+      tags: [archivos]
+      operationId: subirArchivo
+      summary: Subir un archivo (CV o logo)
+      description: >
+        Recibe un archivo multipart (campo "archivo") y lo guarda en el
+        servidor. tipo=cv acepta PDF/Word; tipo=logo acepta imágenes.
+        Máximo 5 MB. Devuelve la URL pública para cv_url / logo_url.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: tipo
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [cv, logo]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [archivo]
+              properties:
+                archivo:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Archivo guardado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      url:
+                        type: string
+                        format: uri
+                        example: http://localhost:4000/uploads/ab12.pdf
+                      nombre:
+                        type: string
+                      tamano:
+                        type: integer
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          description: Archivo mayor a 5 MB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '415':
+          description: Tipo de archivo no permitido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    RutaId:
+      name: id
+      in: path
+      required: true
+      description: Identificador del recurso
+      schema:
+        type: integer
+        example: 1
+
+  schemas:
+    RegistroRequest:
+      type: object
+      required: [correo, contrasena, tipo_usuario]
+      properties:
+        correo:
+          type: string
+          format: email
+          example: ana@ejemplo.com
+        contrasena:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 72
+          example: PatronClave123!
+        tipo_usuario:
+          type: string
+          enum: [candidato, empresa, mentor]
+          example: candidato
+        nombre_completo:
+          type: string
+          maxLength: 150
+          description: Obligatorio de facto para candidato y mentor
+          example: Ana Martínez
+        nombre_empresa:
+          type: string
+          maxLength: 150
+          description: Nombre de la empresa para el rol empresa
+          example: Tecnova
+
+    LoginRequest:
+      type: object
+      required: [correo, contrasena]
+      properties:
+        correo:
+          type: string
+          format: email
+          example: ana@ejemplo.com
+        contrasena:
+          type: string
+          format: password
+          example: PatronClave123!
+
+    UsuarioResponse:
+      type: object
+      properties:
+        id_usuario:
+          type: integer
+          example: 1
+        correo:
+          type: string
+          example: ana@ejemplo.com
+        tipo_usuario:
+          type: string
+          enum: [candidato, empresa, admin, mentor]
+        fecha_registro:
+          type: string
+          format: date-time
+        activo:
+          type: boolean
+          example: true
+
+    AuthResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+          description: JWT de acceso (15 minutos por defecto)
+        token_type:
+          type: string
+          const: Bearer
+        expires_in:
+          type: integer
+          description: Segundos de validez del access token
+          example: 900
+
+    CandidatoPerfil:
+      type: object
+      properties:
+        id_candidato:
+          type: integer
+        id_usuario:
+          type: integer
+        correo:
+          type: string
+        nombre_completo:
+          type: string
+        telefono:
+          type: [string, 'null']
+        ubicacion:
+          type: [string, 'null']
+        resumen_perfil:
+          type: [string, 'null']
+        tipo_discapacidad:
+          type: [string, 'null']
+          description: Dato privado del candidato
+        visible_discapacidad:
+          type: boolean
+          default: false
+        cv_url:
+          type: [string, 'null']
+        fecha_creacion:
+          type: string
+          format: date-time
+        habilidades:
+          type: array
+          items:
+            $ref: '#/components/schemas/HabilidadPerfil'
+        ajustes:
+          type: array
+          items:
+            $ref: '#/components/schemas/AjustePerfil'
+
+    CandidatoActualizar:
+      type: object
+      properties:
+        nombre_completo:
+          type: string
+          maxLength: 150
+        telefono:
+          type: [string, 'null']
+          maxLength: 20
+        ubicacion:
+          type: [string, 'null']
+          maxLength: 150
+        resumen_perfil:
+          type: [string, 'null']
+          maxLength: 4000
+        tipo_discapacidad:
+          type: [string, 'null']
+          maxLength: 100
+          description: Dato privado del candidato
+        visible_discapacidad:
+          type: boolean
+        cv_url:
+          type: [string, 'null']
+          format: uri
+          maxLength: 255
+      minProperties: 1
+
+    HabilidadPerfil:
+      type: object
+      properties:
+        id_habilidad:
+          type: integer
+        nombre_habilidad:
+          type: string
+        categoria:
+          type: [string, 'null']
+        nivel:
+          type: string
+          enum: [basico, intermedio, avanzado]
+
+    AjustePerfil:
+      type: object
+      properties:
+        id_ajuste:
+          type: integer
+        nombre_ajuste:
+          type: string
+
+    EmpresaPerfil:
+      type: object
+      properties:
+        id_empresa:
+          type: integer
+        id_usuario:
+          type: integer
+        correo:
+          type: string
+        nombre_empresa:
+          type: string
+        descripcion:
+          type: [string, 'null']
+        sitio_web:
+          type: [string, 'null']
+        ubicacion:
+          type: [string, 'null']
+        logo_url:
+          type: [string, 'null']
+        fecha_creacion:
+          type: string
+          format: date-time
+        sello:
+          $ref: '#/components/schemas/SelloEmpresa'
+
+    EmpresaActualizar:
+      type: object
+      properties:
+        nombre_empresa:
+          type: string
+          maxLength: 150
+        descripcion:
+          type: [string, 'null']
+          maxLength: 4000
+        sitio_web:
+          type: [string, 'null']
+          format: uri
+          maxLength: 255
+        ubicacion:
+          type: [string, 'null']
+          maxLength: 150
+        logo_url:
+          type: [string, 'null']
+          format: uri
+          maxLength: 255
+      minProperties: 1
+
+    SelloEmpresa:
+      type: [object, 'null']
+      properties:
+        id_sello:
+          type: integer
+        nivel:
+          type: string
+          enum: [basico, intermedio, avanzado]
+        estado:
+          type: string
+          enum: [pendiente, aprobado, rechazado]
+        fecha_verificacion:
+          type: [string, 'null']
+          format: date-time
+        evidencia_url:
+          type: [string, 'null']
+        motivo_rechazo:
+          type: [string, 'null']
+
+    VacanteInput:
+      type: object
+      required: [titulo, descripcion, modalidad]
+      properties:
+        titulo:
+          type: string
+          minLength: 1
+          maxLength: 150
+          example: Desarrollador/a Full Stack
+        descripcion:
+          type: string
+          minLength: 1
+          maxLength: 8000
+          example: Desarrollo de módulos accesibles con Node.js, TypeScript y React.
+        modalidad:
+          type: string
+          enum: [presencial, remoto, hibrido]
+        ubicacion:
+          type: [string, 'null']
+          maxLength: 150
+          example: Ciudad de México
+        salario_min:
+          type: [number, 'null']
+          minimum: 0
+          example: 25000
+        salario_max:
+          type: [number, 'null']
+          minimum: 0
+          example: 40000
+        fecha_cierre:
+          type: [string, 'null']
+          format: date-time
+          description: Debe ser una fecha futura
+        ajustes:
+          type: array
+          description: Ids de tipos de ajuste razonable que ofrece la vacante
+          items:
+            type: integer
+            example: 2
+          maxItems: 50
+
+    VacanteActualizar:
+      type: object
+      properties:
+        titulo:
+          type: string
+          minLength: 1
+          maxLength: 150
+        descripcion:
+          type: string
+          minLength: 1
+          maxLength: 8000
+        modalidad:
+          type: string
+          enum: [presencial, remoto, hibrido]
+        ubicacion:
+          type: [string, 'null']
+          maxLength: 150
+        salario_min:
+          type: [number, 'null']
+          minimum: 0
+        salario_max:
+          type: [number, 'null']
+          minimum: 0
+        fecha_cierre:
+          type: [string, 'null']
+          format: date-time
+        ajustes:
+          type: array
+          description: Reemplaza el set de ajustes ofrecidos
+          items:
+            type: integer
+          maxItems: 50
+      minProperties: 1
+
+    VacanteResponse:
+      type: object
+      properties:
+        id_vacante:
+          type: integer
+        id_empresa:
+          type: integer
+        titulo:
+          type: string
+        descripcion:
+          type: string
+        modalidad:
+          type: string
+          enum: [presencial, remoto, hibrido]
+        ubicacion:
+          type: [string, 'null']
+        salario_min:
+          type: [number, 'null']
+        salario_max:
+          type: [number, 'null']
+        fecha_publicacion:
+          type: string
+          format: date-time
+        fecha_cierre:
+          type: [string, 'null']
+          format: date-time
+        estado:
+          type: string
+          enum: [activa, cerrada, en_revision]
+        alerta_lenguaje:
+          type: boolean
+        ajustes:
+          type: array
+          items:
+            $ref: '#/components/schemas/AjusteVacante'
+        empresa:
+          $ref: '#/components/schemas/EmpresaVacante'
+
+    AlertaLenguaje:
+      type: object
+      properties:
+        alerta_lenguaje:
+          type: boolean
+        sugerencia_redaccion:
+          type: [string, 'null']
+
+    AjusteVacante:
+      type: object
+      properties:
+        id_ajuste:
+          type: integer
+        nombre_ajuste:
+          type: string
+        descripcion:
+          type: [string, 'null']
+
+    EmpresaVacante:
+      type: object
+      properties:
+        id_empresa:
+          type: integer
+        nombre_empresa:
+          type: string
+        logo_url:
+          type: [string, 'null']
+        ubicacion:
+          type: [string, 'null']
+        sello:
+          type: [object, 'null']
+          properties:
+            nivel:
+              type: string
+              enum: [basico, intermedio, avanzado]
+            estado:
+              type: string
+              enum: [pendiente, aprobado, rechazado]
+
+    ListadoVacantes:
+      type: object
+      properties:
+        total:
+          type: integer
+          example: 24
+        page:
+          type: integer
+          example: 1
+        limit:
+          type: integer
+          example: 20
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/VacanteResponse'
+
+    Recomendacion:
+      type: object
+      properties:
+        puntaje_match:
+          type: number
+          description: Puntaje de compatibilidad (0-100) por similitud coseno
+          example: 87.43
+        vacante:
+          $ref: '#/components/schemas/VacanteResponse'
+
+    ListadoRecomendaciones:
+      type: object
+      properties:
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Recomendacion'
+
+    MensajeHistorial:
+      type: object
+      required: [rol, contenido]
+      properties:
+        rol:
+          type: string
+          enum: [usuario, asistente]
+        contenido:
+          type: string
+          maxLength: 4000
+
+    MensajeChatbotInput:
+      type: object
+      required: [mensaje]
+      properties:
+        mensaje:
+          type: string
+          minLength: 1
+          maxLength: 4000
+          example: ¿Cómo preparo mi entrevista?
+        historial:
+          type: array
+          description: Últimos turnos de la conversación para dar contexto al asistente
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/MensajeHistorial'
+
+    RespuestaChatbot:
+      type: object
+      properties:
+        respuesta:
+          type: string
+          description: Respuesta generada por el asistente de IA
+
+    AjusteSugerido:
+      type: object
+      properties:
+        id_ajuste:
+          type: integer
+          example: 4
+        nombre_ajuste:
+          type: string
+          example: Horario flexible
+        descripcion:
+          type: [string, 'null']
+        justificacion:
+          type: string
+          description: Motivo de la recomendación basado en normativa de accesibilidad laboral
+          example: Favorece la inclusión laboral permitiendo adaptar jornadas a necesidades de salud o terapia.
+
+    Habilidad:
+      type: object
+      properties:
+        id_habilidad:
+          type: integer
+        nombre_habilidad:
+          type: string
+          example: Accesibilidad Web
+        categoria:
+          type: [string, 'null']
+          example: Accesibilidad
+
+    HabilidadInput:
+      type: object
+      required: [nombre_habilidad]
+      properties:
+        nombre_habilidad:
+          type: string
+          minLength: 1
+          maxLength: 100
+        categoria:
+          type: [string, 'null']
+          maxLength: 50
+
+    TipoAjuste:
+      type: object
+      properties:
+        id_ajuste:
+          type: integer
+        nombre_ajuste:
+          type: string
+          example: Horario flexible
+        descripcion:
+          type: [string, 'null']
+
+    TipoAjusteInput:
+      type: object
+      required: [nombre_ajuste]
+      properties:
+        nombre_ajuste:
+          type: string
+          minLength: 1
+          maxLength: 150
+        descripcion:
+          type: [string, 'null']
+          maxLength: 4000
+
+    EstadoPostulacion:
+      type: string
+      enum: [enviada, en_revision, entrevista, rechazada, contratada]
+      description: >
+        enviada (asignada por el sistema al postular), en_revision, entrevista,
+        rechazada y contratada (decididas por la empresa). Una vez rechazada o
+        contratada la postulación queda cerrada.
+
+    PostulacionInput:
+      type: object
+      required: [id_vacante]
+      properties:
+        id_vacante:
+          type: integer
+          example: 1
+
+    CambiarEstadoInput:
+      type: object
+      required: [estado]
+      properties:
+        estado:
+          type: string
+          enum: [en_revision, entrevista, rechazada, contratada]
+          description: Estado de decisión de la empresa (no se puede fijar 'enviada')
+
+    PostulacionResponse:
+      type: object
+      properties:
+        id_postulacion:
+          type: integer
+        id_candidato:
+          type: integer
+        id_vacante:
+          type: integer
+        estado:
+          $ref: '#/components/schemas/EstadoPostulacion'
+        fecha_postulacion:
+          type: string
+          format: date-time
+        puntaje_match:
+          type: [number, 'null']
+          description: Puntaje de compatibilidad (0-100) por similitud coseno
+        vacante:
+          $ref: '#/components/schemas/VacantePostulacion'
+
+    VacantePostulacion:
+      type: object
+      properties:
+        id_vacante:
+          type: integer
+        titulo:
+          type: string
+        modalidad:
+          type: string
+          enum: [presencial, remoto, hibrido]
+        ubicacion:
+          type: [string, 'null']
+        salario_min:
+          type: [number, 'null']
+        salario_max:
+          type: [number, 'null']
+        estado:
+          type: string
+          enum: [activa, cerrada, en_revision]
+        empresa:
+          $ref: '#/components/schemas/EmpresaPostulacion'
+
+    EmpresaPostulacion:
+      type: object
+      properties:
+        id_empresa:
+          type: integer
+        nombre_empresa:
+          type: string
+        logo_url:
+          type: [string, 'null']
+        ubicacion:
+          type: [string, 'null']
+        sello:
+          type: [object, 'null']
+          properties:
+            nivel:
+              type: string
+              enum: [basico, intermedio, avanzado]
+            estado:
+              type: string
+              enum: [pendiente, aprobado, rechazado]
+
+    CandidatoPostulacion:
+      type: object
+      properties:
+        id_candidato:
+          type: integer
+        nombre_completo:
+          type: string
+        telefono:
+          type: [string, 'null']
+        ubicacion:
+          type: [string, 'null']
+        resumen_perfil:
+          type: [string, 'null']
+        cv_url:
+          type: [string, 'null']
+        visible_discapacidad:
+          type: boolean
+        tipo_discapacidad:
+          type: [string, 'null']
+          description: Solo se expone si visible_discapacidad es true
+        habilidades:
+          type: array
+          items:
+            type: object
+            properties:
+              id_habilidad:
+                type: integer
+              nombre_habilidad:
+                type: string
+              categoria:
+                type: [string, 'null']
+              nivel:
+                type: string
+                enum: [basico, intermedio, avanzado]
+        ajustes:
+          type: array
+          items:
+            type: object
+            properties:
+              id_ajuste:
+                type: integer
+              nombre_ajuste:
+                type: string
+
+    PostulacionRecibida:
+      type: object
+      description: Postulación vista por la empresa, con el perfil público del candidato
+      properties:
+        id_postulacion:
+          type: integer
+        id_candidato:
+          type: integer
+        id_vacante:
+          type: integer
+        estado:
+          $ref: '#/components/schemas/EstadoPostulacion'
+        fecha_postulacion:
+          type: string
+          format: date-time
+        puntaje_match:
+          type: [number, 'null']
+        vacante:
+          $ref: '#/components/schemas/VacantePostulacion'
+        candidato:
+          $ref: '#/components/schemas/CandidatoPostulacion'
+
+    ListadoPostulaciones:
+      type: object
+      properties:
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/PostulacionResponse'
+
+    ListadoPostulacionesRecibidas:
+      type: object
+      properties:
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/PostulacionRecibida'
+        resumen:
+          type: object
+          properties:
+            por_estado:
+              type: object
+              description: Conteos de postulaciones por estado
+              additionalProperties:
+                type: integer
+
+    SelloInput:
+      type: object
+      required: [evidencia_url]
+      properties:
+        nivel:
+          type: string
+          enum: [basico, intermedio, avanzado]
+          description: Nivel solicitado (por defecto basico)
+          example: basico
+        evidencia_url:
+          type: string
+          format: uri
+          maxLength: 255
+          description: URL de la evidencia subida por la empresa
+          example: https://cdn.enlaza.com/evidencias/empresa-1.pdf
+
+    SelloDecisionInput:
+      type: object
+      required: [estado]
+      properties:
+        estado:
+          type: string
+          enum: [aprobado, rechazado]
+        motivo_rechazo:
+          type: string
+          maxLength: 255
+          description: Obligatorio cuando estado = rechazado
+
+    SelloResponse:
+      type: object
+      properties:
+        id_sello:
+          type: integer
+        id_empresa:
+          type: integer
+        nivel:
+          type: string
+          enum: [basico, intermedio, avanzado]
+        estado:
+          type: string
+          enum: [pendiente, aprobado, rechazado]
+        fecha_verificacion:
+          type: [string, 'null']
+          format: date-time
+        verificado_por:
+          type: [integer, 'null']
+        evidencia_url:
+          type: [string, 'null']
+        motivo_rechazo:
+          type: [string, 'null']
+
+    SolicitudSelloAdmin:
+      type: object
+      allOf:
+        - $ref: '#/components/schemas/SelloResponse'
+        - type: object
+          required: [empresa]
+          properties:
+            empresa:
+              type: object
+              properties:
+                id_empresa:
+                  type: integer
+                nombre_empresa:
+                  type: string
+                ubicacion:
+                  type: [string, 'null']
+                logo_url:
+                  type: [string, 'null']
+
+    ListadoSolicitudesSello:
+      type: object
+      properties:
+        total:
+          type: integer
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/SolicitudSelloAdmin'
+
+    ResenaInput:
+      type: object
+      required: [calificacion]
+      properties:
+        calificacion:
+          type: integer
+          minimum: 1
+          maximum: 5
+        comentario:
+          type: string
+          maxLength: 4000
+
+    ResenaResponse:
+      type: object
+      properties:
+        id_resena:
+          type: integer
+        id_candidato:
+          type: integer
+        id_empresa:
+          type: integer
+        calificacion:
+          type: integer
+        comentario:
+          type: [string, 'null']
+        fecha_resena:
+          type: string
+          format: date-time
+        moderada:
+          type: boolean
+        candidato:
+          type: object
+          properties:
+            id_candidato:
+              type: integer
+            nombre_completo:
+              type: string
+            visible_discapacidad:
+              type: boolean
+
+    ListadoResenas:
+      type: object
+      properties:
+        total:
+          type: integer
+        promedio:
+          type: [number, 'null']
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResenaResponse'
+
+    MentorInput:
+      type: object
+      properties:
+        biografia:
+          type: string
+          maxLength: 4000
+
+    MentorResponse:
+      type: object
+      properties:
+        id_mentor:
+          type: integer
+        id_candidato:
+          type: integer
+        biografia:
+          type: [string, 'null']
+        disponible:
+          type: boolean
+        candidato:
+          type: object
+          properties:
+            id_candidato:
+              type: integer
+            nombre_completo:
+              type: string
+            ubicacion:
+              type: [string, 'null']
+            resumen_perfil:
+              type: [string, 'null']
+
+    MentoriaInput:
+      type: object
+      required: [id_mentor]
+      properties:
+        id_mentor:
+          type: integer
+        fecha_sesion:
+          type: [string, 'null']
+          format: date-time
+          description: Fecha y hora de la sesión (opcional)
+        notas:
+          type: string
+          maxLength: 4000
+
+    MentoriaResponse:
+      type: object
+      properties:
+        id_mentoria:
+          type: integer
+        id_mentor:
+          type: integer
+        id_candidato:
+          type: integer
+        fecha_sesion:
+          type: [string, 'null']
+          format: date-time
+        notas:
+          type: [string, 'null']
+        mentor:
+          type: object
+          properties:
+            id_mentor:
+              type: integer
+            candidato:
+              type: object
+              properties:
+                id_candidato:
+                  type: integer
+                nombre_completo:
+                  type: string
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          const: false
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              description: Código de dominio para el error
+              example: VALIDACION_FALLIDA
+            message:
+              type: string
+              description: Explicación de qué pasó y cómo resolverlo
+              example: Revisa los datos enviados e inténtalo de nuevo.
+            details:
+              type: array
+              description: Detalle por campo (solo en errores de validación)
+              items:
+                type: object
+                properties:
+                  campo:
+                    type: string
+                    example: correo
+                  mensaje:
+                    type: string
+                    example: Correo inválido

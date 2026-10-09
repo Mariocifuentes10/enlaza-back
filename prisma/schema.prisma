@@ -1,0 +1,294 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum TipoUsuario {
+  candidato
+  empresa
+  admin
+  mentor
+}
+
+enum NivelSello {
+  basico
+  intermedio
+  avanzado
+}
+
+enum EstadoSello {
+  pendiente
+  aprobado
+  rechazado
+}
+
+enum NivelHabilidad {
+  basico
+  intermedio
+  avanzado
+}
+
+enum Modalidad {
+  presencial
+  remoto
+  hibrido
+}
+
+enum EstadoVacante {
+  activa
+  cerrada
+  en_revision
+}
+
+enum EstadoPostulacion {
+  enviada
+  en_revision
+  entrevista
+  rechazada
+  contratada
+}
+
+model Usuario {
+  id_usuario      Int           @id @default(autoincrement())
+  correo          String        @unique @db.VarChar(150)
+  contrasena_hash String        @db.VarChar(255)
+  tipo_usuario    TipoUsuario
+  fecha_registro  DateTime      @default(now()) @db.Timestamp(0)
+  activo          Boolean       @default(true)
+
+  candidato       Candidato?
+  empresa         Empresa?
+  sello_verificados SelloInclusion[] @relation("SelloVerificadoPor")
+  refresh_tokens  RefreshToken[]
+  conversaciones_chatbot ConversacionChatbot[]
+
+  @@map("usuarios")
+}
+
+model Candidato {
+  id_candidato         Int      @id @default(autoincrement())
+  id_usuario           Int      @unique
+  nombre_completo      String   @db.VarChar(150)
+  telefono             String?  @db.VarChar(20)
+  ubicacion            String?  @db.VarChar(150)
+  resumen_perfil       String?  @db.Text
+  tipo_discapacidad    String?  @db.VarChar(100)
+  visible_discapacidad Boolean  @default(false)
+  cv_url               String?  @db.VarChar(255)
+  fecha_creacion       DateTime @default(now()) @db.Timestamp(0)
+
+  usuario        Usuario              @relation(fields: [id_usuario], references: [id_usuario], onDelete: Cascade)
+  habilidades    HabilidadCandidato[]
+  ajustes        AjusteCandidato[]
+  postulaciones  Postulacion[]
+  resenas        Resena[]
+  mentor         Mentor?
+  mentorias      Mentoria[]
+
+  @@index([ubicacion])
+  @@map("candidatos")
+}
+
+model Empresa {
+  id_empresa     Int      @id @default(autoincrement())
+  id_usuario     Int      @unique
+  nombre_empresa String   @db.VarChar(150)
+  descripcion    String?  @db.Text
+  sitio_web      String?  @db.VarChar(255)
+  ubicacion      String?  @db.VarChar(150)
+  logo_url       String?  @db.VarChar(255)
+  fecha_creacion DateTime @default(now()) @db.Timestamp(0)
+
+  usuario        Usuario          @relation(fields: [id_usuario], references: [id_usuario], onDelete: Cascade)
+  sello          SelloInclusion?
+  vacantes       Vacante[]
+  resenas        Resena[]
+
+  @@map("empresas")
+}
+
+model SelloInclusion {
+  id_sello           Int          @id @default(autoincrement())
+  id_empresa         Int          @unique
+  nivel              NivelSello
+  fecha_verificacion DateTime?    @db.Timestamp(0)
+  verificado_por     Int?
+  evidencia_url      String?      @db.VarChar(255)
+  estado             EstadoSello  @default(pendiente)
+  motivo_rechazo     String?      @db.VarChar(255)
+
+  empresa          Empresa  @relation(fields: [id_empresa], references: [id_empresa], onDelete: Cascade)
+  verificado_por_user Usuario? @relation("SelloVerificadoPor", fields: [verificado_por], references: [id_usuario])
+
+  @@map("sello_inclusion")
+}
+
+model Habilidad {
+  id_habilidad     Int     @id @default(autoincrement())
+  nombre_habilidad String  @unique @db.VarChar(100)
+  categoria        String? @db.VarChar(50)
+
+  candidatos HabilidadCandidato[]
+
+  @@map("habilidades")
+}
+
+model HabilidadCandidato {
+  id_candidato Int
+  id_habilidad Int
+  nivel        NivelHabilidad
+
+  candidato Candidato @relation(fields: [id_candidato], references: [id_candidato], onDelete: Cascade)
+  habilidad Habilidad @relation(fields: [id_habilidad], references: [id_habilidad], onDelete: Cascade)
+
+  @@id([id_candidato, id_habilidad])
+  @@map("habilidades_candidato")
+}
+
+model TipoAjuste {
+  id_ajuste     Int     @id @default(autoincrement())
+  nombre_ajuste String  @db.VarChar(150)
+  descripcion   String? @db.Text
+
+  candidatos AjusteCandidato[]
+  vacantes   AjusteVacante[]
+
+  @@map("tipos_ajuste")
+}
+
+model AjusteCandidato {
+  id_candidato Int
+  id_ajuste    Int
+
+  candidato Candidato   @relation(fields: [id_candidato], references: [id_candidato], onDelete: Cascade)
+  ajuste    TipoAjuste  @relation(fields: [id_ajuste], references: [id_ajuste], onDelete: Cascade)
+
+  @@id([id_candidato, id_ajuste])
+  @@map("ajustes_candidato")
+}
+
+model Vacante {
+  id_vacante        Int           @id @default(autoincrement())
+  id_empresa        Int
+  titulo            String        @db.VarChar(150)
+  descripcion       String        @db.Text
+  modalidad         Modalidad
+  ubicacion         String?       @db.VarChar(150)
+  salario_min       Decimal?      @db.Decimal(10, 2)
+  salario_max       Decimal?      @db.Decimal(10, 2)
+  fecha_publicacion DateTime      @default(now()) @db.Timestamp(0)
+  fecha_cierre      DateTime?     @db.Timestamp(0)
+  estado            EstadoVacante @default(activa)
+  alerta_lenguaje   Boolean       @default(false)
+  sugerencia_redaccion String?    @db.Text
+
+  empresa       Empresa          @relation(fields: [id_empresa], references: [id_empresa], onDelete: Cascade)
+  ajustes       AjusteVacante[]
+  postulaciones Postulacion[]
+
+  @@index([estado])
+  @@fulltext([titulo, descripcion])
+  @@map("vacantes")
+}
+
+model AjusteVacante {
+  id_vacante Int
+  id_ajuste  Int
+
+  vacante Vacante    @relation(fields: [id_vacante], references: [id_vacante], onDelete: Cascade)
+  ajuste  TipoAjuste @relation(fields: [id_ajuste], references: [id_ajuste], onDelete: Cascade)
+
+  @@id([id_vacante, id_ajuste])
+  @@map("ajustes_vacante")
+}
+
+model Postulacion {
+  id_postulacion    Int               @id @default(autoincrement())
+  id_candidato      Int
+  id_vacante        Int
+  puntaje_match     Decimal?          @db.Decimal(5, 2)
+  estado            EstadoPostulacion @default(enviada)
+  fecha_postulacion DateTime          @default(now()) @db.Timestamp(0)
+
+  candidato Candidato @relation(fields: [id_candidato], references: [id_candidato], onDelete: Cascade)
+  vacante   Vacante   @relation(fields: [id_vacante], references: [id_vacante], onDelete: Cascade)
+
+  @@unique([id_candidato, id_vacante])
+  @@index([id_candidato])
+  @@index([id_vacante])
+  @@map("postulaciones")
+}
+
+model Resena {
+  id_resena    Int      @id @default(autoincrement())
+  id_candidato Int
+  id_empresa   Int
+  calificacion Int
+  comentario   String?  @db.Text
+  fecha_resena DateTime @default(now()) @db.Timestamp(0)
+  moderada     Boolean  @default(false)
+
+  candidato Candidato @relation(fields: [id_candidato], references: [id_candidato], onDelete: Cascade)
+  empresa   Empresa   @relation(fields: [id_empresa], references: [id_empresa], onDelete: Cascade)
+
+  @@unique([id_candidato, id_empresa])
+  @@index([id_empresa])
+  @@map("resenas")
+}
+
+model Mentor {
+  id_mentor    Int     @id @default(autoincrement())
+  id_candidato Int     @unique
+  biografia    String? @db.Text
+  disponible   Boolean @default(true)
+
+  candidato Candidato  @relation(fields: [id_candidato], references: [id_candidato], onDelete: Cascade)
+  mentorias Mentoria[]
+
+  @@map("mentores")
+}
+
+model Mentoria {
+  id_mentoria  Int       @id @default(autoincrement())
+  id_mentor    Int
+  id_candidato Int
+  fecha_sesion DateTime? @db.Timestamp(0)
+  notas        String?   @db.Text
+
+  mentor    Mentor    @relation(fields: [id_mentor], references: [id_mentor], onDelete: Cascade)
+  candidato Candidato @relation(fields: [id_candidato], references: [id_candidato], onDelete: Cascade)
+
+  @@map("mentorias")
+}
+
+model RefreshToken {
+  id          Int       @id @default(autoincrement())
+  token_hash  String    @unique @db.VarChar(255)
+  id_usuario  Int
+  tipo        String    @default("refresh") @db.VarChar(20)
+  expira_en   DateTime  @db.Timestamp(0)
+  revocado_en DateTime? @db.Timestamp(0)
+  creado_en   DateTime  @default(now()) @db.Timestamp(0)
+
+  usuario Usuario @relation(fields: [id_usuario], references: [id_usuario], onDelete: Cascade)
+
+  @@index([id_usuario])
+  @@map("refresh_tokens")
+}
+
+model ConversacionChatbot {
+  id_mensaje Int      @id @default(autoincrement())
+  id_usuario Int
+  rol        String   @db.VarChar(20)
+  contenido  String   @db.Text
+  creado_en  DateTime @default(now()) @db.Timestamp(0)
+
+  usuario Usuario @relation(fields: [id_usuario], references: [id_usuario], onDelete: Cascade)
+
+  @@index([id_usuario, creado_en])
+  @@map("conversaciones_chatbot")
+}
